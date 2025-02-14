@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Simple AI Chat</title>
+    <title>Learning AI Chat</title>
     <style>
         #chat-container {
             width: 500px;
@@ -24,6 +24,7 @@
             margin: 5px;
             padding: 10px;
             border-radius: 5px;
+            position: relative;
         }
         .user-message {
             background-color: #e3f2fd;
@@ -31,6 +32,19 @@
         }
         .ai-message {
             background-color: #f5f5f5;
+        }
+        .feedback-buttons {
+            display: none;
+            position: absolute;
+            right: 10px;
+            top: -20px;
+        }
+        .ai-message:hover .feedback-buttons {
+            display: block;
+        }
+        .feedback-button {
+            cursor: pointer;
+            margin: 0 2px;
         }
     </style>
 </head>
@@ -42,15 +56,17 @@
     </div>
 
     <script>
+        let lastUserMessage = '';
+        let lastAiResponse = '';
+
         function sendMessage() {
             const input = document.getElementById('user-input');
             const message = input.value;
             if (message.trim() === '') return;
 
-            // Display user message
+            lastUserMessage = message;
             addMessage(message, 'user-message');
             
-            // Send to backend
             fetch('/chat', {
                 method: 'POST',
                 headers: {
@@ -60,6 +76,7 @@
             })
             .then(response => response.json())
             .then(data => {
+                lastAiResponse = data.response;
                 addMessage(data.response, 'ai-message');
             });
 
@@ -71,9 +88,41 @@
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${className}`;
             messageDiv.textContent = message;
+            
+            if (className === 'ai-message') {
+                const feedbackDiv = document.createElement('div');
+                feedbackDiv.className = 'feedback-buttons';
+                feedbackDiv.innerHTML = `
+                    <span class="feedback-button" onclick="sendFeedback('positive')">👍</span>
+                    <span class="feedback-button" onclick="sendFeedback('negative')">👎</span>
+                `;
+                messageDiv.appendChild(feedbackDiv);
+            }
+            
             container.appendChild(messageDiv);
             container.scrollTop = container.scrollHeight;
         }
+
+        function sendFeedback(type) {
+            fetch('/feedback', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    user_message: lastUserMessage,
+                    ai_response: lastAiResponse,
+                    feedback: type
+                })
+            });
+        }
+
+        // Handle Enter key
+        document.getElementById('user-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
     </script>
 </body>
 </html>
