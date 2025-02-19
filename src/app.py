@@ -1,148 +1,129 @@
 from flask import Flask, render_template, request, jsonify
-import random
-import nltk
-import json
 import numpy as np
-from nltk.tokenize import word_tokenize
-from nltk.corpus import stopwords
-from nltk.stem import WordNetLemmatizer
-import string
-from datetime import datetime
+from transformers import AutoTokenizer, AutoModel
+import torch
+from sklearn.metrics.pairwise import cosine_similarity
+import random
 
 app = Flask(__name__)
 
-# Download required NLTK data
-nltk.download('punkt')
-nltk.download('stopwords')
-nltk.download('wordnet')
+# Load BERT model for semantic understanding
+tokenizer = AutoTokenizer.from_pretrained('sentence-transformers/bert-base-nli-mean-tokens')
+model = AutoModel.from_pretrained('sentence-transformers/bert-base-nli-mean-tokens')
 
-# Initialize lemmatizer
-lemmatizer = WordNetLemmatizer()
-
-# Load responses from JSON file
-def load_responses():
-    try:
-        with open('responses.json', 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {
-            "greetings": {
-                "patterns": ["hello", "hi", "hey", "good morning", "good evening"],
-                "responses": ["Hi there!", "Hello!", "Hey!", "Greetings!", "Welcome!"],
-                "context": "greeting"
-            },
-            "farewell": {
-                "patterns": ["bye", "goodbye", "see you", "later"],
-                "responses": ["Goodbye!", "See you later!", "Bye!", "Take care!", "Until next time!"],
-                "context": "farewell"
-            },
-            "gratitude": {
-                "patterns": ["thank you", "thanks", "appreciate"],
-                "responses": ["You're welcome!", "Glad I could help!", "My pleasure!", "Anytime!"],
-                "context": "gratitude"
-            },
-            "mood": {
-                "patterns": ["how are you", "how do you feel", "what's up"],
-                "responses": ["I'm doing great!", "I'm learning new things!", "Excited to chat!", "Ready to help!"],
-                "context": "mood"
-            },
-            "capabilities": {
-                "patterns": ["what can you do", "help me", "your abilities"],
-                "responses": ["I can chat, learn, and help with various topics!", "I'm an AI assistant ready to help!", "Let's explore what we can do together!"],
-                "context": "capabilities"
-            }
-        }
-
-responses_data = load_responses()
-
-# Learning system
-class LearningSystem:
+class DynamicAI:
     def __init__(self):
-        self.conversation_history = []
-        self.learned_patterns = {}
-        self.load_learned_patterns()
+        self.conversation_memory = []
+        self.knowledge_base = {}
+        self.context_window = 5
 
-    def load_learned_patterns(self):
-        try:
-            with open('learned_patterns.json', 'r') as f:
-                self.learned_patterns = json.load(f)
-        except FileNotFoundError:
-            self.learned_patterns = {}
+    def get_embedding(self, text):
+        tokens = tokenizer(text, return_tensors='pt', padding=True, truncation=True)
+        with torch.no_grad():
+            outputs = model(**tokens)
+        return outputs.last_hidden_state.mean(dim=1).numpy()
 
-    def save_learned_patterns(self):
-        with open('learned_patterns.json', 'w') as f:
-            json.dump(self.learned_patterns, f)
-
-    def learn_from_interaction(self, user_input, response, feedback=None):
-        timestamp = datetime.now().isoformat()
-        interaction = {
-            'user_input': user_input,
-            'response': response,
-            'timestamp': timestamp,
-            'feedback': feedback
-        }
-        self.conversation_history.append(interaction)
+    def generate_response(self, user_input):
+        # Add to conversation memory
+        self.conversation_memory.append({"role": "user", "content": user_input})
         
-        # Learn new patterns
-        processed_input = preprocess_text(user_input)
-        if processed_input not in self.learned_patterns:
-            self.learned_patterns[processed_input] = {
-                'responses': [response],
-                'usage_count': 1,
-                'success_rate': 1.0
-            }
-        else:
-            self.learned_patterns[processed_input]['usage_count'] += 1
-            if response not in self.learned_patterns[processed_input]['responses']:
-                self.learned_patterns[processed_input]['responses'].append(response)
+        # Get context from recent conversations
+        recent_context = self.conversation_memory[-self.context_window:]
         
-        self.save_learned_patterns()
-
-learning_system = LearningSystem()
-
-def preprocess_text(text):
-    tokens = word_tokenize(text.lower())
-    stop_words = set(stopwords.words('english'))
-    tokens = [lemmatizer.lemmatize(token) for token in tokens 
-             if token not in string.punctuation and token not in stop_words]
-    return " ".join(tokens)
-
-def get_response(message):
-    processed_message = preprocess_text(message)
-    
-    # Check learned patterns first
-    if processed_message in learning_system.learned_patterns:
-        learned_data = learning_system.learned_patterns[processed_message]
-        response = random.choice(learned_data['responses'])
+        # Generate embedding for user input
+        input_embedding = self.get_embedding(user_input)
+        
+        # Generate response based on context and semantic understanding
+        response = self.create_dynamic_response(user_input, input_embedding, recent_context)
+        
+        self.conversation_memory.append({"role": "assistant", "content": response})
         return response
-    
-    # Check predefined patterns
-    for category, data in responses_data.items():
-        for pattern in data['patterns']:
-            if pattern in processed_message:
-                response = random.choice(data['responses'])
-                learning_system.learn_from_interaction(message, response)
-                return response
-    
-    # Generate a response based on context analysis
-    context_response = generate_context_response(processed_message)
-    learning_system.learn_from_interaction(message, context_response)
-    return context_response
 
-def generate_context_response(processed_message):
-    # Simple context-based response generation
-    words = processed_message.split()
-    
-    if any(word in ['what', 'who', 'where', 'when', 'why', 'how'] for word in words):
-        return "That's an interesting question. Let me learn more about it."
-    
-    if any(word in ['can', 'could', 'would', 'will'] for word in words):
-        return "I'm analyzing your request to provide better assistance."
-    
-    if any(word in ['feel', 'think', 'believe', 'opinion'] for word in words):
-        return "I'm processing different perspectives on this topic."
-    
-    return "I'm learning about this topic to provide better responses in the future."
+    def create_dynamic_response(self, user_input, input_embedding, context):
+        # Analyze sentiment and intent
+        sentiment_score = self.analyze_sentiment(user_input)
+        intent = self.detect_intent(user_input)
+        
+        # Generate response components
+        context_info = self.extract_context_info(context)
+        relevant_knowledge = self.retrieve_relevant_knowledge(input_embedding)
+        
+        # Construct response
+        response_components = []
+        
+        if intent == "question":
+            response_components.append(self.generate_answer(user_input, relevant_knowledge))
+        elif intent == "statement":
+            response_components.append(self.generate_insight(user_input, context_info))
+        elif intent == "greeting":
+            response_components.append(self.generate_greeting(sentiment_score))
+        
+        # Add follow-up or elaboration
+        if random.random() < 0.7:  # 70% chance to add follow-up
+            response_components.append(self.generate_follow_up(context_info))
+        
+        return " ".join(response_components)
+
+    def analyze_sentiment(self, text):
+        # Simple sentiment analysis
+        positive_words = set(['good', 'great', 'awesome', 'excellent', 'happy', 'love'])
+        negative_words = set(['bad', 'terrible', 'awful', 'sad', 'hate', 'wrong'])
+        
+        words = text.lower().split()
+        sentiment_score = sum(1 for word in words if word in positive_words)
+        sentiment_score -= sum(1 for word in words if word in negative_words)
+        
+        return sentiment_score
+
+    def detect_intent(self, text):
+        question_words = set(['what', 'why', 'how', 'when', 'where', 'who'])
+        text_lower = text.lower()
+        
+        if any(word in text_lower.split() for word in question_words):
+            return "question"
+        elif any(greeting in text_lower for greeting in ['hello', 'hi', 'hey']):
+            return "greeting"
+        else:
+            return "statement"
+
+    def extract_context_info(self, context):
+        # Extract key information from recent conversation context
+        key_points = []
+        for message in context:
+            # Extract entities, topics, and themes
+            content = message['content'].lower()
+            words = content.split()
+            key_points.extend([word for word in words if len(word) > 4])  # Simple keyword extraction
+        
+        return list(set(key_points))  # Remove duplicates
+
+    def retrieve_relevant_knowledge(self, query_embedding):
+        # Simulate knowledge retrieval
+        # In a real implementation, this would search through a knowledge base
+        return ["I understand this topic", "Let me share my perspective", "Based on my analysis"]
+
+    def generate_answer(self, question, knowledge):
+        # Generate a specific answer based on the question and knowledge
+        return f"Based on my analysis, {random.choice(knowledge)}. Would you like to know more?"
+
+    def generate_insight(self, statement, context):
+        # Generate an insight or observation
+        return f"I notice that {random.choice(context)} is important here. Let me elaborate..."
+
+    def generate_greeting(self, sentiment):
+        time_greetings = ["Hope you're having a great day!", "It's wonderful to interact with you!"]
+        return random.choice(time_greetings)
+
+    def generate_follow_up(self, context):
+        follow_ups = [
+            "What are your thoughts on this?",
+            "Would you like to explore this further?",
+            "How does this relate to your experience?",
+            f"I'm curious about your perspective on {random.choice(context) if context else 'this topic'}."
+        ]
+        return random.choice(follow_ups)
+
+ai = DynamicAI()
 
 @app.route('/')
 def home():
@@ -151,18 +132,8 @@ def home():
 @app.route('/chat', methods=['POST'])
 def chat():
     user_message = request.json['message']
-    ai_response = get_response(user_message)
+    ai_response = ai.generate_response(user_message)
     return jsonify({"response": ai_response})
 
-@app.route('/feedback', methods=['POST'])
-def feedback():
-    data = request.json
-    learning_system.learn_from_interaction(
-        data['user_message'],
-        data['ai_response'],
-        data['feedback']
-    )
-    return jsonify({"status": "success"})
-
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000)
