@@ -4,8 +4,11 @@ from transformers import AutoTokenizer, AutoModel
 import torch
 from sklearn.metrics.pairwise import cosine_similarity
 import random
+from app import app
 
-app = Flask(__name__)
+if __name__ == "__main__":
+    app.run()
+
 
 # Load BERT model for semantic understanding
 tokenizer = AutoTokenizer.from_pretrained('sentence-transformers/bert-base-nli-mean-tokens')
